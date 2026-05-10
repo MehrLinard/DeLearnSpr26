@@ -2,3 +2,4 @@
 **/wandb
 gradcam_outputs/
 glove/
+**/__pycache__
