@@ -352,7 +352,79 @@ class SquareNode(MetaNode):
             node.backward(grad_x)
 
 
-# ######  TO DO  #########
-    # class MSELossNode(MetaNode):
+
+class MSELossNode(MetaNode):
     # Advice: mimic the MultiplyNode and adapt the forward() and
     # backward() methods
+    """A binary multiplication node: z = x1 * x2.
+
+    Semantic role-based: x1 and x2 roles are explicit at
+    construction, making gradient flow deterministic and unambiguous.
+    """
+
+    def __init__(self, x1: ValueNode, x2: ValueNode, out: ValueNode):
+        """Create a multiplication operator node.
+
+        Args:
+            x1: First multiplicand node.
+            x2: Second multiplicand node.
+            out: Output node receiving ``x1 * x2``.
+        """
+        super().__init__()
+        # parents[0] is always x1, parents[1] is always x2
+        x1.connect_to(self)
+        x2.connect_to(self)
+        self.connect_to(out)
+        self._received_count = 0
+
+    def get_parent_values(self) -> tuple[float, float]:
+        """Return parent values in the fixed ``(x1, x2)`` order."""
+        return self.parents[0].v, self.parents[1].v
+
+    def receive_parent_value(self, v: float):
+        """Record input arrival from a parent.
+
+        The scalar itself is not stored here because it is read from parent
+        nodes during forward/backward; only readiness state is tracked.
+        """
+        del v  # value is read from parents[].v in forward/backward
+        if self._received_count >= 2:
+            raise Exception(
+                "This node accepts 2 inputs that are already filled"
+            )
+        self._received_count += 1
+        if self._received_count == 2:
+            self.input_ready = True
+
+    def reset_values(self):
+        """Reset readiness counters and recursively reset descendants."""
+        self._received_count = 0
+        self.input_ready = False
+        for node in self.children:
+            node.reset_values()
+
+    def forward(self):
+        """Compute product and push to children once both inputs are ready."""
+        if self.input_ready:
+            # x1_val = y_hat , x_2val = y
+            y_hat, y = self.get_parent_values()
+
+            # loss per one calculation item is times 0.5, power 2
+            loss = 0.5 * (y_hat - y)**2
+
+            for node in self.children:
+                node.receive_parent_value(loss)
+                node.forward()
+
+    def backward(self, grad_z):
+        """Apply product rule and route gradients to both parents."""
+        #x1_val = y_hat , x_2val = y
+        y_hat, y = self.get_parent_values()
+
+        #calculate grads
+        #
+        grad_y_hat = grad_z * (y_hat - y)
+        grad_y = grad_z * (y - y_hat)
+
+        self.parents[0].backward(grad_y_hat)
+        self.parents[1].backward(grad_y)
